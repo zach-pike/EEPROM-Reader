@@ -1,0 +1,1 @@
+g++ src/main.cpp src/serialib/lib/serialib.cpp
