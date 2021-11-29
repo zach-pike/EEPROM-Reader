@@ -1,5 +1,7 @@
-// Address port is A and lower 3 bits of port C
-// I/O port is L
+// Low address port is PORTA
+// High address port is PORTC
+
+// I/O is PORTL
 
 #include <Arduino.h>
 
@@ -18,6 +20,7 @@
 #define ADDRESS_HIGH_DDR DDRC
 #define ADDRESS_HIGH_PORT PORTC
 
+// This should be a singleton class as it uses external definitions
 class CustomEEPROM {
 	private:
 		uint32_t size;
