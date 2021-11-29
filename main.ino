@@ -1,19 +1,26 @@
-// Address port is A
-// I/O port is C
+// Address port is A and lower 3 bits of port C
+// I/O port is L
 
 #include <Arduino.h>
+
+// To force definitions for Port L
+#define __ATmegaxx0__
+
+// IO definitions
 #include <avr/iom2560.h>
 
-#define IODDR DDRC
-#define IOPORT PORTC
-#define IOPIN PINC
+#define IODDR DDRL
+#define IOPORT PORTL
+#define IOPIN PINL
 
-#define ADDRESSDDR DDRA
-#define ADDRESSPORT PORTA
+#define ADDRESS_LOW_DDR DDRA
+#define ADDRESS_LOW_PORT PORTA
+#define ADDRESS_HIGH_DDR DDRC
+#define ADDRESS_HIGH_PORT PORTC
 
 class CustomEEPROM {
 	private:
-		uint16_t size;
+		uint32_t size;
 
 		// Enables the EEPROM
 		uint8_t ChipEnable;
@@ -80,14 +87,31 @@ class CustomEEPROM {
 			setOutputEnable(false);
 		}
 
+		void setAddress(uint32_t address) {
+			byte* bytes = (byte*)&address;
+
+			ADDRESS_LOW_PORT = bytes[0];
+			ADDRESS_HIGH_PORT = bytes[1];
+		}
+
+		// NOTE this does not set the data direction for the I/O port
+		byte readIOPort() {
+			return IOPIN;
+		}
+
+		// NOTE this does not set the data direction for the I/O port
+		void setIOPort(byte data) {
+			IOPORT = data;
+		}
+	public:
 		// Reset everything to do with the EEPROM
 		void resetAll() {
 			resetAllFlagPins();
-			ADDRESSPORT = 0x00;
+			setAddress(0x00);
 
 			// Reset the I/O port to 0
 			SetIODirection(DataDirection::OUT);
-			IOPORT = 0x00;
+			setIOPort(0x00);
 			SetIODirection(DataDirection::IN);
 		}
 
@@ -115,8 +139,8 @@ class CustomEEPROM {
 			// Set the I/O pins to be output
 			SetIODirection(DataDirection::OUT);
 		}
-	public:
-		CustomEEPROM(uint16_t size, uint8_t CE, uint8_t OE, uint8_t WE) {
+
+		CustomEEPROM(uint32_t size, uint8_t CE, uint8_t OE, uint8_t WE) {
 			// Store size
 			CustomEEPROM::size = size;
 
@@ -131,7 +155,8 @@ class CustomEEPROM {
 			pinMode(ChipEnable, OUTPUT);
 
 			// Set address port to output 
-			ADDRESSDDR = 0xff;
+			ADDRESS_LOW_DDR = 0xff;
+			ADDRESS_HIGH_DDR = 0xff;
 
 			// Reset all the Ports, pin flags, etc...
 			resetAll();
@@ -142,15 +167,15 @@ class CustomEEPROM {
 		// when setting singleShot to false, The following need to be set beforehand
 		// SetIODirection(DataDirection::OUT);, prepareWrite();
 		// and resetAll() needs to be called after
-		void writeByte(uint16_t addr, byte data, bool singleShot = true) {
+		void writeByte(uint32_t addr, byte data, bool singleShot = true) {
 			// Set some common things before writing
 			if (singleShot) prepareWrite();
 
 			// Send the data to the I/O port
-			IOPORT = data;
+			setIOPort(data);
 
-			// Send the address to the address port
-			ADDRESSPORT = addr;
+			// Send the address to the address ports
+			setAddress(addr);
 
 			// Set write enable
 			setWriteEnable(true);
@@ -171,18 +196,18 @@ class CustomEEPROM {
 
 		// Read a byte from a address
 		// singleAction determines weather we should auto disable the chip after a read
-		byte readByte(uint16_t address, bool singleAction = true) {
+		byte readByte(uint32_t address, bool singleAction = true) {
 			// Enable chip & output
 			if (singleAction) prepareRead();
 
 			// Set address port
-			PORTA = address;
+			setAddress(address);
 
 			// Let set values stabilize
 			delay(1);
 
 			// Read value and set Address port to 0
-			byte value = IOPIN;
+			byte value = readIOPort();
 
 			// Disable chip & output
 			if (singleAction) resetAll();
@@ -192,12 +217,12 @@ class CustomEEPROM {
 		}
 
 		// Write an array of bytes to the EEPROM with a few additional parameters
-		void writeBinary(byte data[], size_t sizeOfArray, uint16_t offset = 0x00, byte defaultByte = 0x00) {
+		void writeBinary(byte data[], size_t sizeOfArray, uint32_t offset = 0x00, byte defaultByte = 0x00) {
 			// Prepare a few things before we write
 			prepareWrite();
 
 			// Loop over entire EEPROM memory
-			for (uint16_t i=offset; i < size; i++) {
+			for (uint32_t i=offset; i < size; i++) {
 				if (i < sizeOfArray)
 					writeByte(i, data[i], false);
 				else
@@ -208,19 +233,9 @@ class CustomEEPROM {
 			resetAll();
 		}
 
-		void readBytes(void* dest, uint16_t address, size_t bytes) {
-			prepareRead();
-
-			for (unsigned i=address; i < address + bytes; i++) {
-				((byte*)dest)[i] = readByte(i, false);
-			}
-
-			resetAll();
-		}
-
 		// Read a value of type T from address in EEPROM
 		template <typename T>
-		T readValue(unsigned int address) {
+		T readValue(uint32_t address) {
 			// Allocate memory for our data
 			byte* value = (byte*)malloc(sizeof(T));
 
@@ -228,7 +243,7 @@ class CustomEEPROM {
 			prepareRead();
 
 			// Read n ammout of bytes to the buffer
-			for (uint16_t i = 0; i < sizeof(T); i++)
+			for (uint32_t i = 0; i < sizeof(T); i++)
 				value[i] = readByte(address + i, false);
 					
 			// Refer to previous refrences comment
@@ -244,7 +259,7 @@ class CustomEEPROM {
 		}
 
 		// Dump contents of eeprom
-		void dumpEEPROM(uint16_t to = 0xff) {
+		void dumpEEPROM(uint32_t to = 0xff) {
 			// Print the key
 			Serial.println(":)\t00\t01\t02\t03\t04\t05\t06\t07\t08\t09\t0A\t0B\t0C\t0D\t0E\t0F");
 
@@ -254,7 +269,7 @@ class CustomEEPROM {
 			// Format string
 			const char* fmt = "%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X\t%X";
 
-			for (unsigned i=0; i < to; i += 16) {
+			for (uint32_t i=0; i < to; i += 16) {
 				char buf[100];
 				for (int i=0; i < sizeof(buf); i++) buf[i] = 0;
 
@@ -289,50 +304,65 @@ class CustomEEPROM {
 };
 
 // Holds size of EEPROM
-const unsigned int EEPROMSize = 0x3E80;
+// 2,048 WORDs or 2,048 bytes
+const uint32_t EEPROMSize = 0x800;
 
 CustomEEPROM eeprom(EEPROMSize, 2, 3, 4);
-
-struct ReadData {
-    uint32_t dataSize;
-} __attribute__((packed));
 
 void setup() {
 	Serial.begin(115200);
 
-	// Serial.println("Reading uint16_t from address 0x00");
-	// auto val = eeprom.readValue<uint16_t>(0x00);
-	// Serial.println(val);
+	// 50 days lmao
+	// This is here so that the Serial.readBytes won't timeout and try to continue without reading a header
+	Serial.setTimeout(0xffffffff);
 }
 
+void serialFlush() {
+	while(Serial.available() > 0) {
+		char t = Serial.read();
+	}
+}
 
 void loop() {
-	// put your main code here, to run repeatedly:
-	String input = Serial.readString();
+	compMode();
+}
 
-	if (input.startsWith("READ")) {
-		// Construct header
-		struct ReadData header;
+void compMode() {
+	byte buffer[sizeof(RequestHeader)];
 
-		// We want to read 256 bytes
-		// aka address 0x00 - 0xFF
-		header.dataSize = 256;
+	// Block untill we read a header
+	Serial.readBytes(buffer, sizeof(RequestHeader));
 
-		// Buffer to hold data we are about to read
-		byte buffer[header.dataSize];
+	// pull out the header
+	RequestHeader header = *((RequestHeader*)buffer);
 
-		// Read data from EEPROM
-		eeprom.readBytes(buffer, 0x00, header.dataSize);
+	switch (header.option){
+		case RequestType::READALL: {
+			// Construct response header
+			ReadallResponseHeader respHeader;
+			respHeader.bytesRead = EEPROMSize;
 
-		// Send header
-		for (unsigned i=0; i < sizeof(ReadData); i++)
-			Serial.write(((byte*)&header)[i]);
+			// Convert the header to a byte array
+			byte* respHeaderArr = (byte*)&respHeader;
 
-		// Send body
-		for (unsigned i=0; i < sizeof(buffer); i++) 
-			Serial.write(buffer[i]);
+			// Send resp header byte by byte over serial
+			for (uint32_t i=0; i < sizeof(respHeader); i++)
+				Serial.write(respHeaderArr[i]);
 
-	} else if (input.startsWith("WRITE")) {
-		// For now nothing
+			// Prepare for eeprom read
+			eeprom.prepareRead();
+
+			// send body byte by byte
+			for (uint32_t i=0; i < EEPROMSize; i++)
+				Serial.write(eeprom.readByte(i, false));
+
+			// Reset after eeprom read
+			eeprom.resetAll();
+		} break;
+	
+		default:
+			break;
 	}
+
+	serialFlush();
 }
